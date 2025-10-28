@@ -2,44 +2,62 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Quest Hand → WebSocket v1.5.2</title>
+    <title>Quest Hand → WebSocket v1.6</title>
     <meta name="xr-compatible" content="true" />
     <style>
       body {
         font-family: sans-serif;
         text-align: center;
-        padding: 20px;
+        padding: 0;
         margin: 0;
         overflow: hidden;
+        background: #000;
+        color: #000;
       }
-      #status { font-weight: bold; color: #0066cc; }
-      #log {
-        text-align: left;
-        margin: 10px auto;
-        width: 90%;
-        background: #f9f9f9;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        padding: 10px;
-        height: 160px;
-        overflow-y: auto;
-        font-size: 13px;
-        white-space: pre-wrap;
-      }
+
       #ui {
         position: absolute;
         top: 10px;
         left: 0;
         width: 100%;
-        z-index: 5;
-        background: rgba(255, 255, 255, 0.9);
-        padding-bottom: 10px;
+        z-index: 10;
+        background: rgba(255,255,255,0.9);
+        border-radius: 8px;
+        padding: 10px 10px 14px;
+        box-sizing: border-box;
       }
-      canvas {
-        position: fixed;
-        top: 0;
-        left: 0;
+
+      #status {
+        font-weight: bold;
+        color: #0066cc;
       }
+
+      #version {
+        font-size: 12px;
+        color: #666;
+      }
+
+      #log {
+        text-align: left;
+        margin: 10px auto 0 auto;
+        width: 90%;
+        background: #f9f9f9;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        padding: 10px;
+        height: 140px;
+        overflow-y: auto;
+        font-size: 12px;
+        line-height: 1.4em;
+        white-space: pre-wrap;
+        color: #000;
+      }
+
+      #ip {
+        width: 380px;
+        max-width: 90%;
+      }
+
       button {
         margin-left: 5px;
         padding: 6px 15px;
@@ -50,129 +68,240 @@
         font-size: 15px;
       }
       button:hover { background: #0056b3; }
+
+      canvas {
+        position: fixed;
+        top: 0;
+        left: 0;
+      }
     </style>
   </head>
 
   <body>
     <div id="ui">
-      <h3>Quest Hand → WebSocket</h3>
-      <p>Status: <span id="status">Disconnected</span></p>
-      <input id="ip" type="text" value="wss://refuse-yields-javascript-adelaide.trycloudflare.com" style="width:380px;" />
-      <button id="connect">Connect + Start XR</button>
-      <div id="log">🕶️ Ready – open this page in Meta Browser on Quest.<br /></div>
+      <div style="margin-bottom:6px;">
+        <strong>Quest Hand → WebSocket</strong>
+        <span id="version">v1.6 (2025-10-29-01:20)</span>
+      </div>
+
+      <div>Status: <span id="status">Disconnected</span></div>
+
+      <div style="margin-top:8px;">
+        <input id="ip" type="text" value="wss://TVOJE-ADRESA.trycloudflare.com" />
+        <button id="connect">Connect</button>
+        <button id="enterVrBtn" style="display:none;">Enter VR</button>
+      </div>
+
+      <div id="log">🕶️ Ready – open this page in Meta Browser on Quest.<br/></div>
     </div>
 
+    <!-- three.js / WebXR helpers -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js"></script>
 
     <script>
-      const VERSION = "v1.5.1";
-      let ws, xrSession, referenceSpace, scene, camera, renderer, spheres = {};
+      const VERSION = "v1.6";
+      let ws = null;
+      let xrSession = null;
+      let referenceSpace = null;
+      let scene, camera, renderer;
+      let spheresByJoint = {}; // { jointName: mesh }
 
-      function log(msg, color = "black") {
+      // barevná paleta podle prstů pro lepší orientaci
+      const fingerColor = {
+        thumb: 0xff4444,   // červená
+        index: 0x4488ff,   // modrá
+        middle: 0x44ff44,  // zelená
+        ring: 0xffff44,    // žlutá
+        little: 0xff44ff,  // růžová
+        other: 0x00ffcc    // fallback
+      };
+
+      function log(msg, color="black") {
         const el = document.getElementById("log");
         const line = document.createElement("div");
-        line.innerHTML = msg;
+        line.textContent = msg;
         line.style.color = color;
         el.appendChild(line);
         el.scrollTop = el.scrollHeight;
       }
 
-      async function initXR() {
+      // vrátí barvu pro daný kloub podle názvu prstu
+      function colorForJoint(jointName) {
+        const lower = jointName.toLowerCase();
+        if (lower.includes("thumb")) return fingerColor.thumb;
+        if (lower.includes("index")) return fingerColor.index;
+        if (lower.includes("middle")) return fingerColor.middle;
+        if (lower.includes("ring")) return fingerColor.ring;
+        if (lower.includes("pinky") || lower.includes("little")) return fingerColor.little;
+        return fingerColor.other;
+      }
+
+      // ----------------------
+      // XR inicializace scény
+      // ----------------------
+      async function initXRAndEnterSession() {
         if (!navigator.xr) {
-          log("❌ WebXR not supported.", "red");
+          log("❌ WebXR not supported / not allowed.", "red");
           return;
         }
 
-        log("🎯 Starting 3D scene...");
+        log("🔍 Checking XR support...");
+        const supported = await navigator.xr.isSessionSupported("immersive-vr");
+        if (!supported) {
+          log("⚠️ immersive-vr not supported on this device/browser.", "orange");
+          return;
+        }
+
+        log("🎯 Requesting XR session...");
+        xrSession = await navigator.xr.requestSession("immersive-vr", {
+          optionalFeatures: ["hand-tracking", "local-floor"],
+        });
+
+        // three.js renderer
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.xr.enabled = true;
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
+
+        // Important: still append VRButton so Quest will officially enter VR mode
+        // Quest typically shows "Enter VR" automatically from this button state.
         document.body.appendChild(VRButton.createButton(renderer));
 
+        // scéna
         scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
-        scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
+        camera = new THREE.PerspectiveCamera(
+          70,
+          window.innerWidth / window.innerHeight,
+          0.01,
+          10
+        );
 
+        // světlo
+        const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
+        scene.add(hemi);
+
+        // jednoduchá "podlaha"
         const floor = new THREE.Mesh(
           new THREE.CircleGeometry(2, 32),
-          new THREE.MeshStandardMaterial({ color: 0xcccccc })
+          new THREE.MeshStandardMaterial({ color: 0x666666 })
         );
         floor.rotation.x = -Math.PI / 2;
         scene.add(floor);
 
-        log("✅ XR scene ready, requesting session...");
-        const supported = await navigator.xr.isSessionSupported("immersive-vr");
-        if (!supported) return log("⚠️ immersive-vr not supported", "orange");
-
-        xrSession = await navigator.xr.requestSession("immersive-vr", {
-          optionalFeatures: ["hand-tracking", "local-floor"],
-        });
         referenceSpace = await xrSession.requestReferenceSpace("local-floor");
         renderer.xr.setReferenceSpace(referenceSpace);
         renderer.xr.setSession(xrSession);
 
-        renderer.setAnimationLoop(onXRFrame);
         document.getElementById("status").innerText = "XR active ✅";
+        log("✅ XR session started!", "green");
+
+        renderer.setAnimationLoop((t, frame) => onXRFrame(t, frame));
       }
 
+      // každé XR frame
       function onXRFrame(time, frame) {
         const session = frame.session;
         for (const inputSource of session.inputSources) {
-          if (inputSource.hand) {
-            for (const [jointName, jointSpace] of inputSource.hand.entries()) {
-              const pose = frame.getJointPose(jointSpace, referenceSpace);
-              if (pose) {
-                if (!spheres[jointName]) {
-                  const sphere = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.01, 8, 8),
-                    new THREE.MeshStandardMaterial({ color: 0x00ffcc })
-                  );
-                  scene.add(sphere);
-                  spheres[jointName] = sphere;
-                }
-                const s = spheres[jointName];
-                s.position.set(
-                  pose.transform.position.x,
-                  pose.transform.position.y,
-                  pose.transform.position.z
-                );
-              }
+          if (!inputSource.hand) continue;
+
+          // sesbírej data pro WS
+          const handData = {};
+          for (const [jointName, jointSpace] of inputSource.hand.entries()) {
+            const pose = frame.getJointPose(jointSpace, referenceSpace);
+            if (!pose) continue;
+
+            // update vizualizace
+            if (!spheresByJoint[jointName]) {
+              const color = colorForJoint(jointName);
+              const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.01, 10, 10),
+                new THREE.MeshStandardMaterial({ color })
+              );
+              scene.add(sphere);
+              spheresByJoint[jointName] = sphere;
+            }
+            const s = spheresByJoint[jointName];
+            s.position.set(
+              pose.transform.position.x,
+              pose.transform.position.y,
+              pose.transform.position.z
+            );
+
+            // ukládáme pro WS
+            handData[jointName] = [
+              pose.transform.position.x,
+              pose.transform.position.y,
+              pose.transform.position.z
+            ];
+          }
+
+          // pošli WS (jen první ruka v daném frame)
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({
+                version: VERSION,
+                hand: inputSource.handedness, // "left" / "right"
+                joints: handData
+              }));
+            } catch (e) {
+              // jen ignore, ať to nespamuje
             }
           }
+
+          // pošleme jen jednu ruku za frame
+          break;
         }
+
         renderer.render(scene, camera);
       }
 
-      document.getElementById("connect").addEventListener("click", () => {
+      // ----------------------
+      // Připojení WebSocket
+      // ----------------------
+      function connectWebSocket() {
         let ip = document.getElementById("ip").value.trim();
         if (!/^wss?:\/\//i.test(ip)) {
-          log("⚠️ Invalid WebSocket address", "orange");
+          log("⚠️ Invalid WebSocket address. Must start with ws:// or wss://", "orange");
           return;
         }
 
-        ws = new WebSocket(ip);
-        log("🔌 Connecting to " + ip + "...", "blue");
+        log("🔌 Connecting to " + ip + " ...", "blue");
+        try {
+          ws = new WebSocket(ip);
+        } catch (err) {
+          log("❌ Exception creating WebSocket: " + err.message, "red");
+          return;
+        }
 
         ws.onopen = () => {
-          log("✅ Connected to WebSocket", "green");
-          document.getElementById("status").innerText = "Connected ✅";
-        
-          // Přidáme tlačítko na spuštění VR
-          const startBtn = document.createElement("button");
-          startBtn.textContent = "👉 Enter VR Mode";
-          startBtn.style.marginTop = "10px";
-          startBtn.onclick = () => {
-            startBtn.remove();
-            initXR();
+          document.getElementById("status").innerText = "WS Connected ✅";
+          log("✅ WebSocket connected.", "green");
+
+          // ukážeme tlačítko Enter VR
+          const enterVrBtn = document.getElementById("enterVrBtn");
+          enterVrBtn.style.display = "inline-block";
+          enterVrBtn.onclick = () => {
+            // jednorázově skryj a vstup do XR
+            enterVrBtn.style.display = "none";
+            initXRAndEnterSession();
           };
-          document.getElementById("ui").appendChild(startBtn);
-          log("🕶️ Click 'Enter VR Mode' to start immersive session", "blue");
+
+          log("🕶️ Tap 'Enter VR' to start XR session.", "blue");
         };
-        ws.onerror = (err) => log("❌ WebSocket error: " + (err.message || "unknown"), "red");
-        ws.onclose = () => log("🔌 Connection closed", "gray");
-      });
+
+        ws.onerror = (e) => {
+          document.getElementById("status").innerText = "WS Error ❌";
+          log("❌ WebSocket error: " + (e.message || "unknown"), "red");
+        };
+
+        ws.onclose = () => {
+          document.getElementById("status").innerText = "WS Disconnected";
+          log("🔌 WebSocket connection closed.", "gray");
+        };
+      }
+
+      document.getElementById("connect").addEventListener("click", connectWebSocket);
     </script>
   </body>
 </html>
