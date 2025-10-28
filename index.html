@@ -1,98 +1,168 @@
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js"></script>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Quest Hand → WebSocket v1.5.1</title>
+    <meta name="xr-compatible" content="true" />
+    <style>
+      body {
+        font-family: sans-serif;
+        text-align: center;
+        padding: 20px;
+        margin: 0;
+        overflow: hidden;
+      }
+      #status { font-weight: bold; color: #0066cc; }
+      #log {
+        text-align: left;
+        margin: 10px auto;
+        width: 90%;
+        background: #f9f9f9;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        padding: 10px;
+        height: 160px;
+        overflow-y: auto;
+        font-size: 13px;
+        white-space: pre-wrap;
+      }
+      #ui {
+        position: absolute;
+        top: 10px;
+        left: 0;
+        width: 100%;
+        z-index: 5;
+        background: rgba(255, 255, 255, 0.9);
+        padding-bottom: 10px;
+      }
+      canvas {
+        position: fixed;
+        top: 0;
+        left: 0;
+      }
+      button {
+        margin-left: 5px;
+        padding: 6px 15px;
+        border: none;
+        background: #007bff;
+        color: white;
+        border-radius: 6px;
+        font-size: 15px;
+      }
+      button:hover { background: #0056b3; }
+    </style>
+  </head>
 
-<script>
-  const VERSION = "v1.5";
-  let ws, xrSession, referenceSpace, scene, camera, renderer, spheres = {};
+  <body>
+    <div id="ui">
+      <h3>Quest Hand → WebSocket</h3>
+      <p>Status: <span id="status">Disconnected</span></p>
+      <input id="ip" type="text" value="wss://refuse-yields-javascript-adelaide.trycloudflare.com" style="width:380px;" />
+      <button id="connect">Connect + Start XR</button>
+      <div id="log">🕶️ Ready – open this page in Meta Browser on Quest.<br /></div>
+    </div>
 
-  function log(msg, color = "black") {
-    const el = document.getElementById("log");
-    const line = document.createElement("div");
-    line.innerHTML = msg;
-    line.style.color = color;
-    el.appendChild(line);
-    el.scrollTop = el.scrollHeight;
-  }
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js"></script>
 
-  async function initXR() {
-    if (!navigator.xr) {
-      log("❌ WebXR not supported.", "red");
-      return;
-    }
+    <script>
+      const VERSION = "v1.5.1";
+      let ws, xrSession, referenceSpace, scene, camera, renderer, spheres = {};
 
-    log("🎯 Starting 3D scene...");
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.xr.enabled = true;
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-    document.body.appendChild(VRButton.createButton(renderer));
+      function log(msg, color = "black") {
+        const el = document.getElementById("log");
+        const line = document.createElement("div");
+        line.innerHTML = msg;
+        line.style.color = color;
+        el.appendChild(line);
+        el.scrollTop = el.scrollHeight;
+      }
 
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
+      async function initXR() {
+        if (!navigator.xr) {
+          log("❌ WebXR not supported.", "red");
+          return;
+        }
 
-    const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(2, 32),
-      new THREE.MeshStandardMaterial({ color: 0x999999 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    scene.add(floor);
+        log("🎯 Starting 3D scene...");
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.xr.enabled = true;
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(VRButton.createButton(renderer));
 
-    log("✅ XR scene ready, requesting session...");
-    const supported = await navigator.xr.isSessionSupported("immersive-vr");
-    if (!supported) return log("⚠️ immersive-vr not supported", "orange");
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
 
-    xrSession = await navigator.xr.requestSession("immersive-vr", {
-      optionalFeatures: ["hand-tracking", "local-floor"],
-    });
-    referenceSpace = await xrSession.requestReferenceSpace("local-floor");
-    renderer.xr.setReferenceSpace(referenceSpace);
-    renderer.xr.setSession(xrSession);
+        const floor = new THREE.Mesh(
+          new THREE.CircleGeometry(2, 32),
+          new THREE.MeshStandardMaterial({ color: 0xcccccc })
+        );
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
 
-    renderer.setAnimationLoop(onXRFrame);
-    document.getElementById("status").innerText = "XR active ✅";
-  }
+        log("✅ XR scene ready, requesting session...");
+        const supported = await navigator.xr.isSessionSupported("immersive-vr");
+        if (!supported) return log("⚠️ immersive-vr not supported", "orange");
 
-  function onXRFrame(time, frame) {
-    const session = frame.session;
-    for (const inputSource of session.inputSources) {
-      if (inputSource.hand) {
-        for (const [jointName, jointSpace] of inputSource.hand.entries()) {
-          const pose = frame.getJointPose(jointSpace, referenceSpace);
-          if (pose) {
-            if (!spheres[jointName]) {
-              const sphere = new THREE.Mesh(
-                new THREE.SphereGeometry(0.01, 8, 8),
-                new THREE.MeshStandardMaterial({ color: 0x00ffcc })
-              );
-              scene.add(sphere);
-              spheres[jointName] = sphere;
+        xrSession = await navigator.xr.requestSession("immersive-vr", {
+          optionalFeatures: ["hand-tracking", "local-floor"],
+        });
+        referenceSpace = await xrSession.requestReferenceSpace("local-floor");
+        renderer.xr.setReferenceSpace(referenceSpace);
+        renderer.xr.setSession(xrSession);
+
+        renderer.setAnimationLoop(onXRFrame);
+        document.getElementById("status").innerText = "XR active ✅";
+      }
+
+      function onXRFrame(time, frame) {
+        const session = frame.session;
+        for (const inputSource of session.inputSources) {
+          if (inputSource.hand) {
+            for (const [jointName, jointSpace] of inputSource.hand.entries()) {
+              const pose = frame.getJointPose(jointSpace, referenceSpace);
+              if (pose) {
+                if (!spheres[jointName]) {
+                  const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.01, 8, 8),
+                    new THREE.MeshStandardMaterial({ color: 0x00ffcc })
+                  );
+                  scene.add(sphere);
+                  spheres[jointName] = sphere;
+                }
+                const s = spheres[jointName];
+                s.position.set(
+                  pose.transform.position.x,
+                  pose.transform.position.y,
+                  pose.transform.position.z
+                );
+              }
             }
-            const s = spheres[jointName];
-            s.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
           }
         }
+        renderer.render(scene, camera);
       }
-    }
-    renderer.render(scene, camera);
-  }
 
-  document.getElementById("connect").addEventListener("click", () => {
-    let ip = document.getElementById("ip").value.trim();
-    if (!/^wss?:\/\//i.test(ip)) {
-      log("⚠️ Invalid WebSocket address", "orange");
-      return;
-    }
+      document.getElementById("connect").addEventListener("click", () => {
+        let ip = document.getElementById("ip").value.trim();
+        if (!/^wss?:\/\//i.test(ip)) {
+          log("⚠️ Invalid WebSocket address", "orange");
+          return;
+        }
 
-    ws = new WebSocket(ip);
-    log("🔌 Connecting to " + ip + "...", "blue");
+        ws = new WebSocket(ip);
+        log("🔌 Connecting to " + ip + "...", "blue");
 
-    ws.onopen = () => {
-      log("✅ Connected to WebSocket", "green");
-      document.getElementById("status").innerText = "Connected ✅";
-      initXR();
-    };
-    ws.onerror = (err) => log("❌ WebSocket error: " + (err.message || "unknown"), "red");
-    ws.onclose = () => log("🔌 Connection closed", "gray");
-  });
-</script>
+        ws.onopen = () => {
+          log("✅ Connected to WebSocket", "green");
+          document.getElementById("status").innerText = "Connected ✅";
+          initXR();
+        };
+        ws.onerror = (err) => log("❌ WebSocket error: " + (err.message || "unknown"), "red");
+        ws.onclose = () => log("🔌 Connection closed", "gray");
+      });
+    </script>
+  </body>
+</html>
