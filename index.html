@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Quest Hand → WebSocket v1.3</title>
+    <title>Quest Hand → WebSocket v1.4</title>
     <meta name="xr-compatible" content="true" />
     <style>
       body { font-family: sans-serif; text-align: center; padding: 20px; }
@@ -36,14 +36,14 @@
   <body>
     <h2>Quest Hand → WebSocket</h2>
     <p>Status: <span id="status">Disconnected</span></p>
-    <p style="font-size:14px; color:gray;">Version: v1.3 (2025-10-29-00:10)</p>
-    <input id="ip" type="text" value="ws://192.168.0.228:8765" style="width:300px;" />
+    <p style="font-size:14px; color:gray;">Version: v1.4 (2025-10-29-00:45)</p>
+    <input id="ip" type="text" value="wss://contain-current-stack-powerseller.trycloudflare.com" style="width:400px;" />
     <button id="connect">Connect + Start XR</button>
 
     <div id="log">🕶️ Ready – open this page in Meta Browser on Quest.<br /></div>
 
     <script>
-      const VERSION = "v1.3";
+      const VERSION = "v1.4";
       let ws, xrSession, referenceSpace;
 
       function log(msg, color = "black") {
@@ -77,7 +77,6 @@
           referenceSpace = await xrSession.requestReferenceSpace("local-floor");
           document.getElementById("status").innerText = "XR active ✅";
           log("✅ XR session started!");
-
           xrSession.requestAnimationFrame(onXRFrame);
         } catch (err) {
           log("❌ Failed to start XR: " + err.message, "red");
@@ -87,7 +86,6 @@
       function sendHandData(frame) {
         if (!ws || ws.readyState !== WebSocket.OPEN || !xrSession) return;
         const hands = [];
-
         for (const inputSource of xrSession.inputSources) {
           if (inputSource.hand) {
             const handData = {};
@@ -104,10 +102,7 @@
             hands.push({ hand: inputSource.handedness, joints: handData });
           }
         }
-
-        if (hands.length > 0) {
-          ws.send(JSON.stringify({ ...hands[0], version: VERSION }));
-        }
+        if (hands.length > 0) ws.send(JSON.stringify({ ...hands[0], version: VERSION }));
       }
 
       function onXRFrame(t, frame) {
@@ -116,18 +111,24 @@
       }
 
       document.getElementById("connect").addEventListener("click", () => {
-        const ip = document.getElementById("ip").value.trim();
-        if (!ip.startsWith("ws://")) {
-          log("⚠️ Please enter valid WebSocket address (e.g., ws://192.168.0.228:8765)", "orange");
+        let ip = document.getElementById("ip").value.trim();
+
+        if (!/^wss?:\/\//i.test(ip)) {
+          log("⚠️ Invalid WebSocket address. Must start with ws:// or wss://", "orange");
           return;
         }
 
-        log("🔌 Connecting to " + ip + " ...");
-        ws = new WebSocket(ip);
+        log("🔌 Connecting to " + ip + " ...", "blue");
+        try {
+          ws = new WebSocket(ip);
+        } catch (e) {
+          log("❌ Exception when creating socket: " + e.message, "red");
+          return;
+        }
 
         ws.onopen = () => {
           document.getElementById("status").innerText = "Connected ✅";
-          log("✅ WebSocket connected! Starting XR session...");
+          log("✅ WebSocket connected! Starting XR session...", "green");
           initXR();
         };
 
