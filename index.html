@@ -2,53 +2,90 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Quest 3 → WebSocket (hand tracking) v1.1</title>
+    <title>Quest Hand → WebSocket v1.3</title>
+    <meta name="xr-compatible" content="true" />
+    <style>
+      body { font-family: sans-serif; text-align: center; padding: 20px; }
+      #status { font-weight: bold; color: #0066cc; }
+      #log {
+        text-align: left;
+        margin: 20px auto;
+        width: 90%;
+        background: #f9f9f9;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        padding: 10px;
+        height: 250px;
+        overflow-y: auto;
+        font-size: 13px;
+        white-space: pre-wrap;
+      }
+      button {
+        margin-top: 10px;
+        padding: 10px 20px;
+        border: none;
+        background: #007bff;
+        color: white;
+        border-radius: 6px;
+        font-size: 16px;
+      }
+      button:hover { background: #0056b3; }
+    </style>
   </head>
-  <body style="font-family:sans-serif; text-align:center;">
+
+  <body>
     <h2>Quest Hand → WebSocket</h2>
     <p>Status: <span id="status">Disconnected</span></p>
-    <p style="font-size:14px; color:gray;">Version: v1.1 (2025-10-28-23:30)</p>
+    <p style="font-size:14px; color:gray;">Version: v1.3 (2025-10-29-00:10)</p>
     <input id="ip" type="text" value="ws://192.168.0.228:8765" style="width:300px;" />
-    <button id="connect">Connect</button>
+    <button id="connect">Connect + Start XR</button>
+
+    <div id="log">🕶️ Ready – open this page in Meta Browser on Quest.<br /></div>
 
     <script>
-      const VERSION = "v1.1";
+      const VERSION = "v1.3";
+      let ws, xrSession, referenceSpace;
 
-      let ws;
-      let xrSession = null;
-      let referenceSpace = null;
+      function log(msg, color = "black") {
+        const el = document.getElementById("log");
+        const line = document.createElement("div");
+        line.innerHTML = msg;
+        line.style.color = color;
+        el.appendChild(line);
+        el.scrollTop = el.scrollHeight;
+      }
 
       async function initXR() {
-        try {
-          if (!navigator.xr) {
-            alert("WebXR not supported.");
-            return;
-          }
+        if (!navigator.xr) {
+          log("❌ WebXR not supported or not allowed. Open this in Meta Browser on Quest.", "red");
+          return;
+        }
 
+        try {
+          log("🔍 Checking XR support...");
           const supported = await navigator.xr.isSessionSupported("immersive-vr");
           if (!supported) {
-            alert("immersive-vr not supported on this device/browser");
+            log("⚠️ immersive-vr not supported on this device/browser.", "orange");
             return;
           }
 
+          log("🎯 Requesting XR session...");
           xrSession = await navigator.xr.requestSession("immersive-vr", {
             optionalFeatures: ["hand-tracking", "local-floor"],
           });
 
           referenceSpace = await xrSession.requestReferenceSpace("local-floor");
-          xrSession.addEventListener("end", () => {
-            document.getElementById("status").innerText = "Session ended";
-          });
+          document.getElementById("status").innerText = "XR active ✅";
+          log("✅ XR session started!");
 
           xrSession.requestAnimationFrame(onXRFrame);
         } catch (err) {
-          console.error(err);
-          alert("Failed to start WebXR: " + err.message);
+          log("❌ Failed to start XR: " + err.message, "red");
         }
       }
 
       function sendHandData(frame) {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN || !xrSession) return;
         const hands = [];
 
         for (const inputSource of xrSession.inputSources) {
@@ -68,8 +105,9 @@
           }
         }
 
-        if (hands.length > 0)
+        if (hands.length > 0) {
           ws.send(JSON.stringify({ ...hands[0], version: VERSION }));
+        }
       }
 
       function onXRFrame(t, frame) {
@@ -78,20 +116,29 @@
       }
 
       document.getElementById("connect").addEventListener("click", () => {
-        const ip = document.getElementById("ip").value;
+        const ip = document.getElementById("ip").value.trim();
+        if (!ip.startsWith("ws://")) {
+          log("⚠️ Please enter valid WebSocket address (e.g., ws://192.168.0.228:8765)", "orange");
+          return;
+        }
+
+        log("🔌 Connecting to " + ip + " ...");
         ws = new WebSocket(ip);
 
         ws.onopen = () => {
-          document.getElementById("status").innerText =
-            "Connected ✅ (v" + VERSION + ")";
+          document.getElementById("status").innerText = "Connected ✅";
+          log("✅ WebSocket connected! Starting XR session...");
           initXR();
         };
+
         ws.onerror = (e) => {
-          document.getElementById("status").innerText = "Connection error ❌";
-          console.error(e);
+          document.getElementById("status").innerText = "Error ❌";
+          log("❌ WebSocket error: " + (e.message || "Unknown error"), "red");
         };
+
         ws.onclose = () => {
           document.getElementById("status").innerText = "Disconnected";
+          log("🔌 WebSocket connection closed.", "gray");
         };
       });
     </script>
