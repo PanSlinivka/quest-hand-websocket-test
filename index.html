@@ -2,37 +2,52 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Quest 3 Hand Tracking → WebSocket</title>
+    <title>Quest 3 → WebSocket (hand tracking)</title>
   </head>
   <body style="font-family:sans-serif; text-align:center;">
-    <h2>Quest Hand Tracking WebSocket Test</h2>
-    <p>Connection: <span id="status">Not connected</span></p>
-    <input id="ip" type="text" placeholder="ws://192.168.0.228:8765" style="width:300px;" />
+    <h2>Quest Hand → WebSocket</h2>
+    <p>Status: <span id="status">Disconnected</span></p>
+    <input id="ip" type="text" value="ws://192.168.0.228:8765" style="width:300px;" />
     <button id="connect">Connect</button>
 
     <script>
-      let ws = null;
+      let ws;
       let xrSession = null;
       let referenceSpace = null;
 
       async function initXR() {
-        if (!navigator.xr) {
-          alert("WebXR not supported in this browser.");
-          return;
+        try {
+          if (!navigator.xr) {
+            alert("WebXR not supported.");
+            return;
+          }
+
+          const supported = await navigator.xr.isSessionSupported("immersive-vr");
+          if (!supported) {
+            alert("immersive-vr not supported on this device/browser");
+            return;
+          }
+
+          xrSession = await navigator.xr.requestSession("immersive-vr", {
+            optionalFeatures: ["hand-tracking", "local-floor"],
+          });
+
+          referenceSpace = await xrSession.requestReferenceSpace("local-floor");
+          xrSession.addEventListener("end", () => {
+            document.getElementById("status").innerText = "Session ended";
+          });
+
+          xrSession.requestAnimationFrame(onXRFrame);
+        } catch (err) {
+          console.error(err);
+          alert("Failed to start WebXR: " + err.message);
         }
-
-        xrSession = await navigator.xr.requestSession("immersive-ar", {
-          requiredFeatures: ["hand-tracking"],
-        });
-        referenceSpace = await xrSession.requestReferenceSpace("local");
-
-        xrSession.requestAnimationFrame(onXRFrame);
       }
 
       function sendHandData(frame) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
         const hands = [];
+
         for (const inputSource of xrSession.inputSources) {
           if (inputSource.hand) {
             const handData = {};
@@ -40,9 +55,9 @@
               const pose = frame.getJointPose(jointSpace, referenceSpace);
               if (pose) {
                 handData[jointName] = [
-                  pose.transform.position.x.toFixed(4),
-                  pose.transform.position.y.toFixed(4),
-                  pose.transform.position.z.toFixed(4),
+                  pose.transform.position.x,
+                  pose.transform.position.y,
+                  pose.transform.position.z,
                 ];
               }
             }
@@ -50,12 +65,10 @@
           }
         }
 
-        if (hands.length > 0) {
-          ws.send(JSON.stringify(hands[0]));
-        }
+        if (hands.length > 0) ws.send(JSON.stringify(hands[0]));
       }
 
-      function onXRFrame(time, frame) {
+      function onXRFrame(t, frame) {
         sendHandData(frame);
         xrSession.requestAnimationFrame(onXRFrame);
       }
@@ -65,17 +78,15 @@
         ws = new WebSocket(ip);
 
         ws.onopen = () => {
-          document.getElementById("status").innerText = "Connected";
+          document.getElementById("status").innerText = "Connected ✅";
           initXR();
         };
-
+        ws.onerror = (e) => {
+          document.getElementById("status").innerText = "Connection error ❌";
+          console.error(e);
+        };
         ws.onclose = () => {
           document.getElementById("status").innerText = "Disconnected";
-        };
-
-        ws.onerror = (e) => {
-          document.getElementById("status").innerText = "Error";
-          console.error(e);
         };
       });
     </script>
