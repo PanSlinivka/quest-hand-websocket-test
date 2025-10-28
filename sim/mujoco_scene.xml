@@ -1,0 +1,47 @@
+<mujoco model="g1_arm_demo">
+  <option timestep="0.01" gravity="0 0 -9.81"/>
+
+  <worldbody>
+    <!-- jen stůl jako referenční plocha -->
+    <body name="table" pos="0 0 0">
+      <geom type="plane" size="1 1 0.01" rgba="0.8 0.8 0.8 1"/>
+    </body>
+
+    <!-- základna paže (rameno robota) -->
+    <body name="base" pos="0 0 0.2">
+      <!-- první kloub: shoulder_yaw -->
+      <joint name="shoulder_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="2"/>
+      <geom type="capsule" fromto="0 0 0 0 0 0.1" size="0.03" rgba="0.2 0.2 0.8 1"/>
+
+      <body name="upper_arm" pos="0 0 0.1">
+        <!-- druhý kloub: shoulder_pitch -->
+        <joint name="shoulder_pitch" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="2"/>
+        <geom type="capsule" fromto="0 0 0 0 0 0.15" size="0.03" rgba="0.2 0.5 0.8 1"/>
+
+        <body name="forearm" pos="0 0 0.15">
+          <!-- třetí kloub: elbow_pitch -->
+          <joint name="elbow_pitch" type="hinge" axis="0 1 0" range="0 2.35" damping="2"/>
+          <geom type="capsule" fromto="0 0 0 0 0 0.15" size="0.025" rgba="0.2 0.8 0.8 1"/>
+
+          <body name="wrist" pos="0 0 0.15">
+            <!-- čtvrtý kloub: wrist_yaw -->
+            <joint name="wrist_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="1"/>
+            <geom type="capsule" fromto="0 0 0 0 0 0.05" size="0.02" rgba="0.8 0.2 0.2 1"/>
+
+            <body name="gripper" pos="0 0 0.05">
+              <geom type="sphere" size="0.03" rgba="0.9 0.4 0.4 1"/>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="act_shoulder_yaw"    joint="shoulder_yaw"    kp="200"/>
+    <position name="act_shoulder_pitch"  joint="shoulder_pitch"  kp="200"/>
+    <position name="act_elbow_pitch"     joint="elbow_pitch"     kp="200"/>
+    <position name="act_wrist_yaw"       joint="wrist_yaw"       kp="100"/>
+  </actuator>
+
+</mujoco>

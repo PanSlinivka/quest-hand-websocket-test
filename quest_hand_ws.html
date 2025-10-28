@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Quest 3 Hand Tracking → WebSocket</title>
+  </head>
+  <body style="font-family:sans-serif; text-align:center;">
+    <h2>Quest Hand Tracking WebSocket Test</h2>
+    <p>Connection: <span id="status">Not connected</span></p>
+    <input id="ip" type="text" placeholder="ws://192.168.0.228:8765" style="width:300px;" />
+    <button id="connect">Connect</button>
+
+    <script>
+      let ws = null;
+      let xrSession = null;
+      let referenceSpace = null;
+
+      async function initXR() {
+        if (!navigator.xr) {
+          alert("WebXR not supported in this browser.");
+          return;
+        }
+
+        xrSession = await navigator.xr.requestSession("immersive-ar", {
+          requiredFeatures: ["hand-tracking"],
+        });
+        referenceSpace = await xrSession.requestReferenceSpace("local");
+
+        xrSession.requestAnimationFrame(onXRFrame);
+      }
+
+      function sendHandData(frame) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        const hands = [];
+        for (const inputSource of xrSession.inputSources) {
+          if (inputSource.hand) {
+            const handData = {};
+            for (const [jointName, jointSpace] of inputSource.hand.entries()) {
+              const pose = frame.getJointPose(jointSpace, referenceSpace);
+              if (pose) {
+                handData[jointName] = [
+                  pose.transform.position.x.toFixed(4),
+                  pose.transform.position.y.toFixed(4),
+                  pose.transform.position.z.toFixed(4),
+                ];
+              }
+            }
+            hands.push({ hand: inputSource.handedness, joints: handData });
+          }
+        }
+
+        if (hands.length > 0) {
+          ws.send(JSON.stringify(hands[0]));
+        }
+      }
+
+      function onXRFrame(time, frame) {
+        sendHandData(frame);
+        xrSession.requestAnimationFrame(onXRFrame);
+      }
+
+      document.getElementById("connect").addEventListener("click", () => {
+        const ip = document.getElementById("ip").value;
+        ws = new WebSocket(ip);
+
+        ws.onopen = () => {
+          document.getElementById("status").innerText = "Connected";
+          initXR();
+        };
+
+        ws.onclose = () => {
+          document.getElementById("status").innerText = "Disconnected";
+        };
+
+        ws.onerror = (e) => {
+          document.getElementById("status").innerText = "Error";
+          console.error(e);
+        };
+      });
+    </script>
+  </body>
+</html>
