@@ -2,15 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Quest 3 → WebSocket (hand tracking)</title>
+    <title>Quest 3 → WebSocket (hand tracking) v1.1</title>
   </head>
   <body style="font-family:sans-serif; text-align:center;">
     <h2>Quest Hand → WebSocket</h2>
     <p>Status: <span id="status">Disconnected</span></p>
+    <p style="font-size:14px; color:gray;">Version: v1.1 (2025-10-28-23:30)</p>
     <input id="ip" type="text" value="ws://192.168.0.228:8765" style="width:300px;" />
     <button id="connect">Connect</button>
 
     <script>
+      const VERSION = "v1.1";
+
       let ws;
       let xrSession = null;
       let referenceSpace = null;
@@ -65,7 +68,8 @@
           }
         }
 
-        if (hands.length > 0) ws.send(JSON.stringify(hands[0]));
+        if (hands.length > 0)
+          ws.send(JSON.stringify({ ...hands[0], version: VERSION }));
       }
 
       function onXRFrame(t, frame) {
@@ -78,7 +82,8 @@
         ws = new WebSocket(ip);
 
         ws.onopen = () => {
-          document.getElementById("status").innerText = "Connected ✅";
+          document.getElementById("status").innerText =
+            "Connected ✅ (v" + VERSION + ")";
           initXR();
         };
         ws.onerror = (e) => {
